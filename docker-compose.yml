@@ -1,0 +1,63 @@
+name: shopfast
+services:
+  frontend:
+    build: ./frontend
+    image: shopfast/frontend:v1
+    ports: ["3000:3000"]
+    networks: [web]
+    depends_on: { backend: { condition: service_healthy } }
+    healthcheck: { test: ["CMD","wget","-qO-","http://127.0.0.1:3000/healthz"], interval: 15s, timeout: 3s, retries: 3 }
+    deploy: { resources: { limits: { cpus: "0.50", memory: 128M } } }
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    image: shopfast/backend:v1
+    environment:
+      PORT: "5000"
+      MONGO_URL: mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/shopfast?authSource=admin
+      REDIS_URL: redis://redis:6379
+      PAYMENT_URL: http://payment:5001
+      LOG_FILE: /tmp/app.log
+    networks: [web, data]
+    depends_on:
+      mongo: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      payment: { condition: service_healthy }
+    healthcheck: { test: ["CMD","wget","-qO-","http://127.0.0.1:5000/readyz"], interval: 15s, timeout: 3s, retries: 5, start_period: 15s }
+    deploy: { resources: { limits: { cpus: "0.50", memory: 256M } } }
+    restart: unless-stopped
+
+  payment:
+    build: ./payment
+    image: shopfast/payment:v1
+    networks: [data]
+    healthcheck: { test: ["CMD","python","-c","import urllib.request;urllib.request.urlopen('http://127.0.0.1:5001/health')"], interval: 15s, timeout: 3s, retries: 3 }
+    deploy: { resources: { limits: { cpus: "0.25", memory: 128M } } }
+    restart: unless-stopped
+
+  mongo:
+    image: mongo:7
+    command: ["mongod","--wiredTigerCacheSizeGB","0.25"]
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD}
+    volumes: [mongo-data:/data/db]
+    networks: [data]
+    healthcheck: { test: ["CMD","mongosh","--quiet","--eval","db.adminCommand('ping').ok"], interval: 15s, timeout: 5s, retries: 5, start_period: 20s }
+    deploy: { resources: { limits: { cpus: "0.50", memory: 512M } } }
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server","--maxmemory","100mb","--maxmemory-policy","allkeys-lru"]
+    networks: [data]
+    healthcheck: { test: ["CMD","redis-cli","ping"], interval: 10s, timeout: 3s, retries: 5 }
+    deploy: { resources: { limits: { cpus: "0.25", memory: 160M } } }
+    restart: unless-stopped
+
+networks:
+  web:  { driver: bridge }
+  data: { driver: bridge, internal: true }   # DB/cache/payment not reachable from outside
+volumes:
+  mongo-data:
