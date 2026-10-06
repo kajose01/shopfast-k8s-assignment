@@ -1,0 +1,15 @@
+# Intentionally BROKEN: memory limit (10Mi) < redis maxmemory (100mb) -> OOMKilled / CrashLoopBackOff
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: redis-broken }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: redis-broken } }
+  template:
+    metadata: { labels: { app: redis-broken } }
+    spec:
+      containers:
+      - name: redis
+        image: redis:7-alpine
+        args: ["--maxmemory","100mb"]
+        resources: { limits: { memory: 10Mi } }
